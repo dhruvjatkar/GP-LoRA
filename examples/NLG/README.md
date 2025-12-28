@@ -1,182 +1,208 @@
-# Adapting GPT-2 using LoRA
+# GP-LoRA for Natural Language Generation
 
-This folder contains the implementation of LoRA in GPT-2 using the Python package `lora` and steps to replicate the results in our recent paper
+This folder contains experiments applying **GP-LoRA (Gauge-Projected Low-Rank Adaptation)** to GPT-2 for natural language generation tasks.
 
-**LoRA: Low-Rank Adaptation of Large Language Models** <br>
-*Edward J. Hu\*, Yelong Shen\*, Phillip Wallis, Zeyuan Allen-Zhu, Yuanzhi Li, Shean Wang, Lu Wang, Weizhu Chen* <br>
-Paper: https://arxiv.org/abs/2106.09685 <br>
+## Overview
 
-<p>
-<img src="figures/LoRA_GPT2.PNG" width="800" >
+GP-LoRA extends LoRA by applying a gauge-fixing projection after each optimizer step, enforcing the imbalance constraint AA^⊤ = μB^⊤B while preserving the weight update Δ = BA exactly. This exploits the gauge symmetry of the low-rank factorization to improve optimization dynamics.
+
+<p align="center">
+<img src="figures/LoRA_GPT2.PNG" width="700">
 </p>
 
-This repo reproduces our experiments on GPT-2.
+## Datasets
 
-## Repository Overview
+We evaluate on three NLG benchmarks:
+- **E2E NLG Challenge**: Restaurant domain dialogue generation
+- **WebNLG**: RDF-to-text generation
+- **DART**: Open-domain structured data-to-text
 
-Our implementation is based on the fine-tuning code for GPT-2 in [Hugging Face](https://huggingface.co/).
-There are several directories in this repo:
-* [src/](src) contains the source code used for data processing, training, and decoding.
-* [eval/](eval) contains the code for task-specific evaluation scripts.
-* [data/](data) contains the raw data we used in our experiments.
-* [vocab/](vocab) contains the GPT-2 vocabulary files.
+## Directory Structure
 
-## Getting Started
-
- 1. You can start with the following docker image: `nvcr.io/nvidia/pytorch:20.03-py3` on a GPU-capable machine, but any generic PyTorch image should work.
- ```
- docker run -it nvcr.io/nvidia/pytorch:20.03-py3
- ```
-
- 2. Clone the repo and install dependencies in a virtual environment (remove sudo if running in docker container):
- ```
- sudo apt-get update
- sudo apt-get -y install git jq virtualenv
- git clone https://github.com/microsoft/LoRA.git; cd LoRA
- virtualenv -p `which python3` ./venv
- . ./venv/bin/activate
- pip install -r requirement.txt
- bash download_pretrained_checkpoints.sh
- bash create_datasets.sh
- cd ./eval
- bash download_evalscript.sh
- cd ..
- ```
-
-#### Now we are ready to replicate the results in our paper.
-
-## Replicating Our Result on E2E
-
-1. Train GPT-2 Medium with LoRA (see our paper for hyperparameters for GPT-2 Medium)
 ```
+NLG/
+├── src/                    # Training and evaluation code
+├── data/                   # Dataset files
+├── eval/                   # Evaluation scripts
+├── vocab/                  # GPT-2 vocabulary
+├── run_e2e_gplora.sh       # GP-LoRA on E2E
+├── run_dart_gplora.sh      # GP-LoRA on DART
+├── run_webnlg_gplora.sh    # GP-LoRA on WebNLG
+├── run_e2e_lora.sh         # Standard LoRA baseline
+├── run_dart_lora.sh        # Standard LoRA baseline
+└── run_webnlg_lora.sh      # Standard LoRA baseline
+```
+
+## Setup
+
+1. **Environment**: Start with a PyTorch-enabled environment (e.g., `nvcr.io/nvidia/pytorch:20.03-py3`)
+
+2. **Install dependencies**:
+```bash
+pip install -r requirement.txt
+```
+
+3. **Install the GP-LoRA library**:
+```bash
+cd ../..  # Navigate to repo root
+pip install -e .
+```
+
+4. **Download pretrained checkpoints and prepare data**:
+```bash
+bash download_pretrained_checkpoints.sh
+bash create_datasets.sh
+cd eval && bash download_evalscript.sh && cd ..
+```
+
+## Running Experiments
+
+### GP-LoRA Training
+
+**E2E Dataset (GP-LoRA)**:
+```bash
+bash run_e2e_gplora.sh
+```
+
+This runs:
+```bash
 python -m torch.distributed.launch --nproc_per_node=1 src/gpt2_ft.py \
     --train_data ./data/e2e/train.jsonl \
     --valid_data ./data/e2e/valid.jsonl \
-    --train_batch_size 8 \
-    --grad_acc 1 \
-    --valid_batch_size 4 \
-    --seq_len 512 \
     --model_card gpt2.md \
-    --init_checkpoint ./pretrained_checkpoints/gpt2-medium-pytorch_model.bin \
-    --platform local \
-    --clip 0.0 \
-    --lr 0.0002 \
-    --weight_decay 0.01 \
-    --correct_bias \
-    --adam_beta2 0.999 \
-    --scheduler linear \
-    --warmup_step 500 \
-    --max_epoch 5 \
-    --save_interval 1000 \
     --lora_dim 4 \
     --lora_alpha 32 \
-    --lora_dropout 0.1 \
-    --label_smooth 0.1 \
-    --work_dir ./trained_models/GPT2_M/e2e \
-    --random_seed 110
+    --gp_lora \
+    --gp_mu auto \
+    --gp_eps 1e-4 \
+    ...
 ```
 
-2. Generate outputs from the trained model using beam search:
+The key GP-LoRA flags are:
+- `--gp_lora`: Enable gauge projection
+- `--gp_mu auto`: Use dimension-calibrated μ = r/m
+- `--gp_eps 1e-4`: Regularization for numerical stability
+
+**Other Datasets**:
+```bash
+bash run_dart_gplora.sh    # DART
+bash run_webnlg_gplora.sh  # WebNLG
 ```
+
+### Standard LoRA Baselines
+
+For comparison, we also provide standard LoRA scripts:
+```bash
+bash run_e2e_lora.sh
+bash run_dart_lora.sh
+bash run_webnlg_lora.sh
+```
+
+## Evaluation Pipeline
+
+### E2E Evaluation
+
+1. **Generate outputs** using beam search:
+```bash
 python -m torch.distributed.launch --nproc_per_node=1 src/gpt2_beam.py \
     --data ./data/e2e/test.jsonl \
-    --batch_size 1 \
-    --seq_len 512 \
-    --eval_len 64 \
     --model_card gpt2.md \
-    --init_checkpoint ./trained_models/GPT2_M/e2e/model.26289.pt \
-    --platform local \
+    --init_checkpoint ./trained_models/GPT2_M/e2e_gplora/model.XXXX.pt \
     --lora_dim 4 \
     --lora_alpha 32 \
     --beam 10 \
     --length_penalty 0.8 \
-    --no_repeat_ngram_size 4 \
-    --repetition_penalty 1.0 \
-    --eos_token_id 628 \
-    --work_dir ./trained_models/GPT2_M/e2e \
-    --output_file predict.26289.b10p08r4.jsonl
+    --work_dir ./trained_models/GPT2_M/e2e_gplora \
+    --output_file predict.XXXX.jsonl
 ```
 
-3. Decode outputs from step (2)
-```
+2. **Decode outputs**:
+```bash
 python src/gpt2_decode.py \
     --vocab ./vocab \
-    --sample_file ./trained_models/GPT2_M/e2e/predict.26289.b10p08r4.jsonl \
+    --sample_file ./trained_models/GPT2_M/e2e_gplora/predict.XXXX.jsonl \
     --input_file ./data/e2e/test_formatted.jsonl \
     --output_ref_file e2e_ref.txt \
     --output_pred_file e2e_pred.txt
 ```
 
-4. Run evaluation on E2E test set
-
-```
+3. **Compute metrics**:
+```bash
 python eval/e2e/measure_scores.py e2e_ref.txt e2e_pred.txt -p
 ```
 
-## Replicating Our Result on WebNLG
+### WebNLG Evaluation
 
-1. Follow steps 1 and 2 from E2E pipeline by replacing references to E2E with webnlg (see our paper for hyperparameters)
-
-2. Decode outputs from beam search (step 2 above)
-```
+```bash
+# Decode
 python src/gpt2_decode.py \
     --vocab ./vocab \
-    --sample_file ./trained_models/GPT2_M/webnlg/predict.20000.b10p08.jsonl \
+    --sample_file ./trained_models/GPT2_M/webnlg_gplora/predict.XXXX.jsonl \
     --input_file ./data/webnlg_challenge_2017/test_formatted.jsonl \
-    --ref_type webnlg \
-    --ref_num 6 \
+    --ref_type webnlg --ref_num 6 \
     --output_ref_file eval/GenerationEval/data/references_webnlg \
     --output_pred_file eval/GenerationEval/data/hypothesis_webnlg \
     --tokenize --lower
+
+# Evaluate
+cd eval/GenerationEval/
+python eval.py -R data/references_webnlg/reference -H data/hypothesis_webnlg -nr 6 -m bleu,meteor,ter
 ```
 
-3. Run evaluation on WebNLG test set
-```
-cd ./eval/GenerationEval/
-python eval.py \
-    -R data/references_webnlg/reference \
-    -H data/hypothesis_webnlg \
-    -nr 6 \
-    -m bleu,meteor,ter 
-cd ../..
-```
+### DART Evaluation
 
-## Replicating Our Result on DART
-
-1. Follow steps 1 and 2 from E2E pipeline by replacing references to E2E with dart (see our paper for hyperparameters)
-
-2. Decode outputs from beam search (step 2 above)
-```
+```bash
+# Decode
 python src/gpt2_decode.py \
-        --vocab ./vocab \
-        --sample_file ./trained_models/GPT2_M/dart/predict.20000.b10p08.jsonl \
-        --input_file ./data/dart/test_formatted.jsonl \
-        --ref_type dart \
-        --ref_num 6 \
-        --output_ref_file eval/GenerationEval/data/references_dart \
-        --output_pred_file eval/GenerationEval/data/hypothesis_dart \
-        --tokenize --lower
+    --vocab ./vocab \
+    --sample_file ./trained_models/GPT2_M/dart_gplora/predict.XXXX.jsonl \
+    --input_file ./data/dart/test_formatted.jsonl \
+    --ref_type dart --ref_num 6 \
+    --output_ref_file eval/GenerationEval/data/references_dart \
+    --output_pred_file eval/GenerationEval/data/hypothesis_dart \
+    --tokenize --lower
+
+# Evaluate
+cd eval/GenerationEval/
+python eval.py -R data/references_dart/reference -H data/hypothesis_dart -nr 6 -m bleu,meteor,ter
 ```
 
-3. Run evaluation on Dart test set
-```
-cd ./eval/GenerationEval/
-python eval.py \
-    -R data/references_dart/reference \
-    -H data/hypothesis_dart \
-    -nr 6 \
-    -m bleu,meteor,ter 
-cd ../..
+## GP-LoRA Configuration
+
+The gauge projection is controlled by:
+
+| Flag | Description | Recommended |
+|------|-------------|-------------|
+| `--gp_lora` | Enable gauge projection after each step | Required |
+| `--gp_mu` | Imbalance ratio μ | `auto` (uses r/m) |
+| `--gp_eps` | Gram matrix regularization | `1e-4` |
+
+## Run All Experiments
+
+To run the complete experiment suite:
+```bash
+bash run_all_experiments.sh
 ```
 
 ## Citation
-```
-@misc{hu2021lora,
-    title={LoRA: Low-Rank Adaptation of Large Language Models},
-    author={Hu, Edward and Shen, Yelong and Wallis, Phil and Allen-Zhu, Zeyuan and Li, Yuanzhi and Wang, Lu and Chen, Weizhu},
-    year={2021},
-    eprint={2106.09685},
-    archivePrefix={arXiv},
-    primaryClass={cs.CL}
+
+If you use this code, please cite GP-LoRA and the original LoRA paper:
+
+```bibtex
+@misc{gplora2024,
+    title={Gauge-Projected Low-Rank Adaptation},
+    author={[Your Name]},
+    year={2024}
+}
+
+@inproceedings{hu2022lora,
+    title={{LoRA}: Low-Rank Adaptation of Large Language Models},
+    author={Edward J Hu and Yelong Shen and Phillip Wallis and Zeyuan Allen-Zhu and Yuanzhi Li and Shean Wang and Lu Wang and Weizhu Chen},
+    booktitle={International Conference on Learning Representations},
+    year={2022}
 }
 ```
+
+## Acknowledgments
+
+The NLG experiment infrastructure is adapted from the [Microsoft LoRA repository](https://github.com/microsoft/LoRA). We thank the original authors for their excellent codebase.

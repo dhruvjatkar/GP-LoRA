@@ -1,6 +1,8 @@
 #  ------------------------------------------------------------------------------------------
-#  Copyright (c) Microsoft Corporation. All rights reserved.
-#  Licensed under the MIT License (MIT). See LICENSE in the repo root for license information.
+#  GP-LoRA: Gauge-Projected Low-Rank Adaptation
+#  Copyright (c) 2024 Dhruv Jatkar (gauge_project_model function)
+#  Copyright (c) Microsoft Corporation (original LoRA utilities)
+#  Licensed under the MIT License. See LICENSE in the repo root for license information.
 #  ------------------------------------------------------------------------------------------
 import torch
 import torch.nn as nn

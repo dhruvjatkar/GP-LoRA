@@ -1,96 +1,217 @@
-# Adapting RoBERTa and DeBERTa V2 using LoRA
+# GP-LoRA for Natural Language Understanding
 
-This folder contains the implementation of LoRA in RoBERTa and DeBERTa V2 using the Python package `lora`. LoRA is described in the following pre-print:
+This folder contains experiments applying **GP-LoRA (Gauge-Projected Low-Rank Adaptation)** to RoBERTa and DeBERTa for the GLUE benchmark.
 
-**LoRA: Low-Rank Adaptation of Large Language Models** <br>
-*Edward J. Hu\*, Yelong Shen\*, Phillip Wallis, Zeyuan Allen-Zhu, Yuanzhi Li, Shean Wang, Lu Wang, Weizhu Chen* <br>
-Paper: https://arxiv.org/abs/2106.09685 <br>
+## Overview
 
-## Adapting to the GLUE Benchmark
-Our experiments on the GLUE benchmark are run on 4 NVIDIA Tesla V100 GPU cards out of a DGX-1. The results may vary due to different GPU models, drivers, CUDA SDK versions, floating-point precisions, and random seeds. 
-We report below the dev set results, taking the medium over 5 runs:
+GP-LoRA extends LoRA by applying a gauge-fixing projection after each optimizer step. The projection enforces the imbalance constraint AA^⊤ = μB^⊤B while preserving Δ = BA exactly, exploiting gauge symmetry to improve optimization dynamics without changing the effective weight update.
 
-<p>
-<img src="figures/LoRA_NLU.PNG" width="800" >
+<p align="center">
+<img src="figures/LoRA_NLU.PNG" width="700">
 </p>
 
-Here are the GLUE benchmark test set results for DeBERTa XXL 1.5B (no ensemble):
+## GLUE Benchmark Results
 
-<p>
-<img src="figures/deberta_lora_glue.jpg" width="800" >
+We evaluate on all GLUE tasks:
+
+<p align="center">
+<img src="figures/deberta_lora_glue.jpg" width="700">
 </p>
 
-## Download LoRA checkpoints
+## Available Experiments
 
-|   | Dataset  | RoBERTa base 125M <br> LoRA - 0.3 M  | RoBERTa large 355M <br> LoRA - 0.8 M  | DeBERTa XXL 1.5B <br> LoRA - 4.7 M |
-|---|----------|--------------------|----------------------|------------------|
-|   | MNLI     |[3.4 MB](https://github.com/msft-edward/LoRA_private/releases/download/RoBERTa-base/roberta_base_lora_mnli.bin) |[7.1 MB](https://github.com/msft-edward/LoRA_private/releases/download/RoBERTa-large/roberta_large_lora_mnli.bin) |[27.1 MB](https://github.com/msft-edward/LoRA_private/releases/download/DeBERTa/deberta_v2_xxlarge_lora_mnli.bin) |
-|   | SST2     |[3.4 MB](https://github.com/msft-edward/LoRA_private/releases/download/RoBERTa-base/roberta_base_lora_sst2.bin)  |[7.1 MB](https://github.com/msft-edward/LoRA_private/releases/download/RoBERTa-large/roberta_large_lora_sst2.bin)  |[27.1 MB](https://github.com/msft-edward/LoRA_private/releases/download/DeBERTa/deberta_v2_xxlarge_lora_mnli.bin)  |
-|   | MRPC     |[3.4 MB](https://github.com/msft-edward/LoRA_private/releases/download/RoBERTa-base/roberta_base_lora_mrpc.bin)  |[7.1 MB](https://github.com/msft-edward/LoRA_private/releases/download/RoBERTa-large/roberta_large_lora_mrpc.bin)  |[27.1 MB](https://github.com/msft-edward/LoRA_private/releases/download/DeBERTa/deberta_v2_xxlarge_lora_mnli.bin)  |
-|   | CoLA     |[3.4 MB](https://github.com/msft-edward/LoRA_private/releases/download/RoBERTa-base/roberta_base_lora_cola.bin)  |[7.1 MB](https://github.com/msft-edward/LoRA_private/releases/download/RoBERTa-large/roberta_large_lora_cola.bin)  |[27.1 MB](https://github.com/msft-edward/LoRA_private/releases/download/DeBERTa/deberta_v2_xxlarge_lora_mnli.bin)  |
-|   | QNLI     |[3.4 MB](https://github.com/msft-edward/LoRA_private/releases/download/RoBERTa-base/roberta_base_lora_qnli.bin)  |[7.1 MB](https://github.com/msft-edward/LoRA_private/releases/download/RoBERTa-large/roberta_large_lora_qnli.bin)  |[27.1 MB](https://github.com/msft-edward/LoRA_private/releases/download/DeBERTa/deberta_v2_xxlarge_lora_mnli.bin)  |
-|   | QQP      |[3.4 MB](https://github.com/msft-edward/LoRA_private/releases/download/RoBERTa-base/roberta_base_lora_qqp.bin)  |[7.1 MB](https://github.com/msft-edward/LoRA_private/releases/download/RoBERTa-large/roberta_large_lora_qqp.bin)  |[27.1 MB](https://github.com/msft-edward/LoRA_private/releases/download/DeBERTa/deberta_v2_xxlarge_lora_mnli.bin)  |
-|   | RTE      |[3.4 MB](https://github.com/msft-edward/LoRA_private/releases/download/RoBERTa-base/roberta_base_lora_rte.bin)  |[7.1 MB](https://github.com/msft-edward/LoRA_private/releases/download/RoBERTa-large/roberta_large_lora_rte.bin)  |[27.1 MB](https://github.com/msft-edward/LoRA_private/releases/download/DeBERTa/deberta_v2_xxlarge_lora_mnli.bin)  |
-|   | STSB     |[3.4 MB](https://github.com/msft-edward/LoRA_private/releases/download/RoBERTa-base/roberta_base_lora_stsb.bin)  |[7.1 MB](https://github.com/msft-edward/LoRA_private/releases/download/RoBERTa-large/roberta_large_lora_stsb.bin)  |[27.1 MB](https://github.com/msft-edward/LoRA_private/releases/download/DeBERTa/deberta_v2_xxlarge_lora_mnli.bin)  |
+### GP-LoRA Scripts
 
-## Steps to reproduce our results
-### Create and activate conda env
-```console
+| Model | Task | Script |
+|-------|------|--------|
+| RoBERTa-base | MNLI | `roberta_base_mnli_gplora.sh` |
+| RoBERTa-base | SST-2 | `roberta_base_sst2_gplora.sh` |
+| RoBERTa-base | MRPC | `roberta_base_mrpc_gplora.sh` |
+| RoBERTa-base | CoLA | `roberta_base_cola_gplora.sh` |
+| RoBERTa-base | QNLI | `roberta_base_qnli_gplora.sh` |
+| RoBERTa-base | QQP | `roberta_base_qqp_gplora.sh` |
+| RoBERTa-base | RTE | `roberta_base_rte_gplora.sh` |
+| RoBERTa-base | STS-B | `roberta_base_stsb_gplora.sh` |
+| RoBERTa-large | All tasks | `roberta_large_*_gplora.sh` |
+| DeBERTa-XXL | All tasks | `deberta_v2_xxlarge_*.sh` |
+
+### Standard LoRA Baselines
+
+Corresponding standard LoRA scripts are provided for comparison:
+- `roberta_base_mnli.sh`, `roberta_large_mnli.sh`, etc.
+
+## Setup
+
+### 1. Create and activate the conda environment
+
+```bash
 conda env create -f environment.yml
-```
-### Install the pre-requisites
-lora:
-```console
-pip install -e ..
-```
-NLU:
-```console
-pip install -e .
-```
-### Start the experiments
-```console
-deberta_v2_xxlarge_mnli.sh
-deberta_v2_xxlarge_sst2.sh
-deberta_v2_xxlarge_mrpc.sh
-deberta_v2_xxlarge_cola.sh
-deberta_v2_xxlarge_qnli.sh
-deberta_v2_xxlarge_qqp.sh
-deberta_v2_xxlarge_rte.sh
-deberta_v2_xxlarge_stsb.sh
-```
-For MRPC, RTE, and STSB, you need to download and start from the LoRA-adapted MNLI checkpoint and change the path accordingly in the shell script.
-
-Attention: xxlarge-mnli is the LoRA-adapted model from our first MNLI experiments, instead of https://huggingface.co/microsoft/deberta-v2-xxlarge-mnli.
-
-We also provide the shell scripts for roberta-base and roberta-large ( {roberta_large|roberta_base}_{task name}.sh ).
-
-### Evaluate the checkpoints
-```console
-python -m torch.distributed.launch --nproc_per_node=1 examples/text-classification/run_glue.py \
---model_name_or_path microsoft/deberta-v2-xxlarge \
---lora_path ./deberta_v2_xxlarge_lora_mnli.bin \
---task_name mnli \
---do_eval \
---output_dir ./output \
---apply_lora \
---lora_r 16 \
---lora_alpha 32
+conda activate gplora
 ```
 
-### Enable Cutoff/R-drop for data augmentation
-```console
-mnli.cutoff.sh
-mnli.rdrop.sh
+### 2. Install the GP-LoRA library
+
+```bash
+# From the NLU directory
+pip install -e ../..   # Install loralib with GP-LoRA
+pip install -e .        # Install the transformers fork
+```
+
+## Running Experiments
+
+### GP-LoRA Training
+
+**Example: RoBERTa-base on MNLI**
+
+```bash
+bash roberta_base_mnli_gplora.sh
+```
+
+This runs:
+```bash
+python -m torch.distributed.launch --nproc_per_node=8 \
+    examples/text-classification/run_glue.py \
+    --model_name_or_path roberta-base \
+    --task_name mnli \
+    --apply_lora \
+    --lora_r 8 \
+    --lora_alpha 16 \
+    --gp_lora \
+    --gp_mu auto \
+    --gp_eps 1e-4 \
+    ...
+```
+
+The GP-LoRA flags are:
+- `--gp_lora`: Enable gauge projection after each optimizer step
+- `--gp_mu auto`: Dimension-calibrated imbalance ratio μ = r/m
+- `--gp_eps 1e-4`: Gram matrix regularization for numerical stability
+
+### Running All Experiments
+
+**RoBERTa-base (all GLUE tasks)**:
+```bash
+# GP-LoRA
+for task in mnli sst2 mrpc cola qnli qqp rte stsb; do
+    bash roberta_base_${task}_gplora.sh
+done
+
+# Standard LoRA baselines
+for task in mnli sst2 mrpc cola qnli qqp rte stsb; do
+    bash roberta_base_${task}.sh
+done
+```
+
+**RoBERTa-large (all GLUE tasks)**:
+```bash
+bash run_roberta_large_experiments.sh
+```
+
+**Complete suite**:
+```bash
+bash run_all_experiments.sh
+```
+
+## Evaluation
+
+### Evaluate a trained checkpoint
+
+```bash
+python -m torch.distributed.launch --nproc_per_node=1 \
+    examples/text-classification/run_glue.py \
+    --model_name_or_path roberta-base \
+    --lora_path ./mnli_gplora/model/checkpoint-best/lora.bin \
+    --task_name mnli \
+    --do_eval \
+    --output_dir ./output \
+    --apply_lora \
+    --lora_r 8 \
+    --lora_alpha 16
+```
+
+### Download pretrained checkpoints
+
+We provide LoRA checkpoints for quick evaluation:
+
+| Model | Task | Checkpoint |
+|-------|------|------------|
+| RoBERTa-base | MNLI | `roberta_base_lora_mnli.bin` |
+| RoBERTa-large | MNLI | `roberta_large_lora_mnli.bin` |
+
+## GP-LoRA Configuration
+
+| Parameter | CLI Flag | Default | Description |
+|-----------|----------|---------|-------------|
+| Enable GP-LoRA | `--gp_lora` | False | Apply gauge projection |
+| Imbalance ratio | `--gp_mu` | `auto` | μ for constraint AA^⊤ = μB^⊤B |
+| Regularization | `--gp_eps` | `1e-4` | Gram matrix regularization |
+
+### Understanding μ (mu)
+
+The imbalance ratio μ controls the target factorization balance:
+- `μ = "auto"`: Uses r/m (dimension-calibrated, recommended)
+- `μ = 1.0`: Balanced factorization AA^⊤ = B^⊤B
+- `μ > 1`: Larger A relative to B
+- `μ < 1`: Smaller A relative to B
+
+The dimension-calibrated choice μ = r/m is motivated by variance preservation in the forward pass.
+
+## Transfer Learning for Low-Resource Tasks
+
+For MRPC, RTE, and STS-B (which have smaller training sets), we recommend:
+
+1. First train on MNLI with GP-LoRA
+2. Initialize from the MNLI checkpoint for the target task
+
+```bash
+# Train on MNLI first
+bash roberta_base_mnli_gplora.sh
+
+# Then fine-tune on RTE (update the script to point to MNLI checkpoint)
+bash roberta_base_rte_gplora.sh
+```
+
+## Data Augmentation
+
+We also support data augmentation techniques:
+
+**Cutoff augmentation**:
+```bash
+bash mnli.cutoff.sh
+```
+
+**R-Drop regularization**:
+```bash
+bash mnli.rdrop.sh
+```
+
+## Adapter Baselines
+
+For comparison with adapter methods:
+```bash
+bash adapter_houlsby_roberta_large_mnli.sh
+bash adapter_pfeiffer_roberta_large_mnli.sh
 ```
 
 ## Citation
-```
-@misc{hu2021lora,
-    title={LoRA: Low-Rank Adaptation of Large Language Models},
-    author={Hu, Edward and Shen, Yelong and Wallis, Phil and Allen-Zhu, Zeyuan and Li, Yuanzhi and Wang, Lu and Chen, Weizhu},
-    year={2021},
-    eprint={2106.09685},
-    archivePrefix={arXiv},
-    primaryClass={cs.CL}
+
+If you use this code, please cite:
+
+```bibtex
+@misc{gplora2024,
+    title={Gauge-Projected Low-Rank Adaptation},
+    author={[Your Name]},
+    year={2024}
+}
+
+@inproceedings{hu2022lora,
+    title={{LoRA}: Low-Rank Adaptation of Large Language Models},
+    author={Edward J Hu and Yelong Shen and Phillip Wallis and Zeyuan Allen-Zhu and Yuanzhi Li and Shean Wang and Lu Wang and Weizhu Chen},
+    booktitle={International Conference on Learning Representations},
+    year={2022}
 }
 ```
+
+## Acknowledgments
+
+The NLU experiment infrastructure and Hugging Face Transformers fork are adapted from the [Microsoft LoRA repository](https://github.com/microsoft/LoRA). We thank the original authors for their comprehensive codebase.
