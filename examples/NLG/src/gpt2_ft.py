@@ -90,6 +90,16 @@ parser.add_argument('--roll_step', type=int, default=100, help='rolling step')
 
 parser.add_argument('--eval_epoch', type=int, default=1, help='eval per number of epochs')
 
+# GP-LoRA (Gauge-Projected LoRA) arguments
+parser.add_argument('--gp_lora', action='store_true', 
+                    help='Enable GP-LoRA gauge projection after each optimizer step')
+
+parser.add_argument('--gp_mu', default='auto', 
+                    help='GP-LoRA imbalance ratio mu (default: auto = r/m)')
+
+parser.add_argument('--gp_eps', type=float, default=1e-4, 
+                    help='GP-LoRA regularization epsilon')
+
 # influence model, calculate the influence score between two samples.
 def print_args(args):
     if args.rank == 0:
@@ -133,7 +143,20 @@ def optimizer_step(_loss, _optimizer, _model, _schedule, args, is_update=True):
             else:
                 torch.nn.utils.clip_grad_norm_(_model.parameters(), args.clip)
 
-        _optimizer.step()        
+        _optimizer.step()
+        
+        # GP-LoRA: Apply gauge projection after optimizer step
+        if args.lora_dim > 0 and getattr(args, 'gp_lora', False):
+            # Parse mu value (can be 'auto' or a float)
+            gp_mu = getattr(args, 'gp_mu', 'auto')
+            if gp_mu != 'auto':
+                try:
+                    gp_mu = float(gp_mu)
+                except ValueError:
+                    gp_mu = 'auto'
+            gp_eps = getattr(args, 'gp_eps', 1e-4)
+            lora.gauge_project_model(_model, mu=gp_mu, eps=gp_eps)
+        
         _optimizer.zero_grad()
 
     if _schedule is not None:

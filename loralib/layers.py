@@ -7,7 +7,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 import math
-from typing import Optional, List
+from typing import Optional, List, Union
+
+from .gauge import gauge_project_factors
 
 class LoRALayer():
     def __init__(
@@ -27,6 +29,39 @@ class LoRALayer():
         # Mark the weight as unmerged
         self.merged = False
         self.merge_weights = merge_weights
+
+    def gauge_project_(
+        self,
+        mu: Union[float, str] = "auto",
+        eps: float = 1e-4,
+        eig_floor: float = 1e-12,
+        cast_fp32: bool = True
+    ) -> None:
+        """
+        In-place gauge projection preserving Delta = lora_B @ lora_A.
+        
+        This applies the gauge transformation (A, B) -> (R @ A, B @ R^{-1})
+        that enforces the imbalance constraint AA^T ≈ μ B^T B while
+        keeping the product B @ A unchanged.
+        
+        Args:
+            mu: Imbalance ratio. If "auto", uses r/m (dimension-calibrated).
+            eps: Regularization parameter for Gram matrices (default 1e-4)
+            eig_floor: Minimum eigenvalue for numerical stability (default 1e-12)
+            cast_fp32: Whether to compute in fp32 for stability (default True)
+        """
+        if not hasattr(self, 'lora_A') or not hasattr(self, 'lora_B'):
+            return
+        if self.r == 0:
+            return
+        
+        with torch.no_grad():
+            A_new, B_new = gauge_project_factors(
+                self.lora_A.data, self.lora_B.data,
+                mu=mu, eps=eps, eig_floor=eig_floor, cast_fp32=cast_fp32
+            )
+            self.lora_A.data.copy_(A_new)
+            self.lora_B.data.copy_(B_new)
 
 
 class Embedding(nn.Embedding, LoRALayer):
@@ -204,6 +239,52 @@ class MergedLinear(nn.Linear, LoRALayer):
         result = x.new_zeros((len(self.lora_ind), *x.shape[1:]))
         result[self.lora_ind] = x
         return result
+
+    def gauge_project_(
+        self,
+        mu: Union[float, str] = "auto",
+        eps: float = 1e-4,
+        eig_floor: float = 1e-12,
+        cast_fp32: bool = True
+    ) -> None:
+        """
+        In-place gauge projection for MergedLinear, applied per-adapter.
+        
+        MergedLinear packs multiple adapters (e.g., q/k/v). This override
+        applies the gauge projection to each adapter independently, which
+        is the correct constraint for grouped adapters.
+        
+        Args:
+            mu: Imbalance ratio. If "auto", uses r/out_per per adapter.
+            eps: Regularization parameter for Gram matrices (default 1e-4)
+            eig_floor: Minimum eigenvalue for numerical stability (default 1e-12)
+            cast_fp32: Whether to compute in fp32 for stability (default True)
+        """
+        if not hasattr(self, 'lora_A') or not hasattr(self, 'lora_B'):
+            return
+        if self.r == 0 or not any(self.enable_lora):
+            return
+        
+        with torch.no_grad():
+            g = sum(self.enable_lora)  # Number of active adapters
+            out_per = self.lora_B.shape[0] // g  # Output dim per adapter
+            in_features = self.lora_A.shape[1]
+            
+            # Reshape to (g, r, in_features) and (g, out_per, r)
+            A_split = self.lora_A.data.view(g, self.r, in_features)
+            B_split = self.lora_B.data.view(g, out_per, self.r)
+            
+            # Project each adapter independently
+            for i in range(g):
+                A_i = A_split[i]  # (r, in_features)
+                B_i = B_split[i]  # (out_per, r)
+                A_new, B_new = gauge_project_factors(
+                    A_i, B_i, mu=mu, eps=eps,
+                    eig_floor=eig_floor, cast_fp32=cast_fp32
+                )
+                # Copy back (views write through to original tensor)
+                A_split[i].copy_(A_new)
+                B_split[i].copy_(B_new)
 
     def merge_AB(self):
         def T(w):

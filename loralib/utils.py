@@ -5,7 +5,7 @@
 import torch
 import torch.nn as nn
 
-from typing import Dict
+from typing import Dict, Union
 
 from .layers import LoRALayer
 
@@ -47,3 +47,37 @@ def lora_state_dict(model: nn.Module, bias: str = 'none') -> Dict[str, torch.Ten
         return to_return
     else:
         raise NotImplementedError
+
+
+def gauge_project_model(
+    model: nn.Module,
+    mu: Union[float, str] = "auto",
+    eps: float = 1e-4,
+    eig_floor: float = 1e-12,
+    cast_fp32: bool = True
+) -> None:
+    """
+    Apply gauge projection to all LoRA layers in the model.
+    
+    This is a convenience function that applies the gauge-fixing projection
+    to every LoRA layer in the model. The projection preserves the forward
+    function (Delta = BA is unchanged) but changes the factorization to
+    enforce the imbalance constraint AA^T ≈ μ B^T B.
+    
+    This should be called after each optimizer step as part of GP-LoRA training:
+    
+        loss.backward()
+        optimizer.step()
+        gauge_project_model(model, mu="auto", eps=1e-4)
+        optimizer.zero_grad()
+    
+    Args:
+        model: The model containing LoRA layers
+        mu: Imbalance ratio. If "auto", uses r/m per adapter (dimension-calibrated).
+        eps: Regularization parameter for Gram matrices (default 1e-4)
+        eig_floor: Minimum eigenvalue for numerical stability (default 1e-12)
+        cast_fp32: Whether to compute in fp32 for stability (default True)
+    """
+    for m in model.modules():
+        if isinstance(m, LoRALayer) and hasattr(m, 'gauge_project_'):
+            m.gauge_project_(mu=mu, eps=eps, eig_floor=eig_floor, cast_fp32=cast_fp32)

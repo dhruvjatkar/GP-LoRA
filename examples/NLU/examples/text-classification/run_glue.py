@@ -44,6 +44,9 @@ from transformers import (
 from transformers.trainer_utils import get_last_checkpoint, is_main_process
 from transformers.utils import check_min_version
 
+# GP-LoRA imports
+import loralib as lora
+
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 check_min_version("4.4.0")
@@ -217,6 +220,70 @@ class ModelArguments:
         default=0.0,
         metadata={"help": "Token Masking Probability"},
     )
+    # GP-LoRA (Gauge-Projected LoRA) arguments
+    gp_lora: Optional[bool] = field(
+        default=False,
+        metadata={"help": "Enable GP-LoRA gauge projection after each optimizer step"},
+    )
+    gp_mu: Optional[str] = field(
+        default='auto',
+        metadata={"help": "GP-LoRA imbalance ratio mu (default: auto = r/m)"},
+    )
+    gp_eps: Optional[float] = field(
+        default=1e-4,
+        metadata={"help": "GP-LoRA regularization epsilon"},
+    )
+
+
+class GPLoRATrainer(Trainer):
+    """
+    Trainer that applies GP-LoRA gauge projection after each optimization step.
+    
+    This implements Algorithm 1 from the GP-LoRA notes: standard optimizer step
+    followed by Proj_{μ,ε} projection on all LoRA layers.
+    """
+    
+    def __init__(self, *args, gp_lora=False, gp_mu='auto', gp_eps=1e-4, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.gp_lora = gp_lora
+        self.gp_mu = gp_mu
+        self.gp_eps = gp_eps
+        self._gp_lora_initialized = False
+    
+    def create_optimizer(self):
+        """Wrap optimizer with GP-LoRA projection."""
+        super().create_optimizer()
+        
+        if self.gp_lora and not self._gp_lora_initialized:
+            # Parse mu value (can be 'auto' or a float)
+            gp_mu = self.gp_mu
+            if gp_mu != 'auto':
+                try:
+                    gp_mu = float(gp_mu)
+                except ValueError:
+                    gp_mu = 'auto'
+            
+            # Store parsed values
+            self._parsed_gp_mu = gp_mu
+            self._parsed_gp_eps = self.gp_eps
+            
+            # Wrap the optimizer's step method to apply gauge projection
+            original_step = self.optimizer.step
+            trainer_self = self
+            
+            def step_with_gp_lora(closure=None):
+                result = original_step(closure)
+                # Apply gauge projection to all LoRA layers
+                lora.gauge_project_model(
+                    trainer_self.model, 
+                    mu=trainer_self._parsed_gp_mu, 
+                    eps=trainer_self._parsed_gp_eps
+                )
+                return result
+            
+            self.optimizer.step = step_with_gp_lora
+            self._gp_lora_initialized = True
+            logger.info(f"GP-LoRA enabled with mu={gp_mu}, eps={self.gp_eps}")
 
     
 def main():
@@ -533,8 +600,9 @@ def main():
     else:
         data_collator = None
 
-    # Initialize our Trainer
-    trainer = Trainer(
+    # Initialize our Trainer (use GPLoRATrainer if gp_lora is enabled)
+    trainer_cls = GPLoRATrainer if model_args.gp_lora else Trainer
+    trainer_kwargs = dict(
         model=model,
         args=training_args,
         train_dataset=train_dataset if training_args.do_train else None,
@@ -543,6 +611,14 @@ def main():
         tokenizer=tokenizer,
         data_collator=data_collator,
     )
+    
+    # Add GP-LoRA specific arguments if using GPLoRATrainer
+    if model_args.gp_lora:
+        trainer_kwargs['gp_lora'] = True
+        trainer_kwargs['gp_mu'] = model_args.gp_mu
+        trainer_kwargs['gp_eps'] = model_args.gp_eps
+    
+    trainer = trainer_cls(**trainer_kwargs)
 
     # Training
     if training_args.do_train:
