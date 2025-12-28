@@ -20,9 +20,11 @@ import logging
 import os
 import random
 import sys
+import time
+import json
 import torch
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, Dict, Any
 
 import numpy as np
 from datasets import load_dataset, load_metric
@@ -43,9 +45,208 @@ from transformers import (
 )
 from transformers.trainer_utils import get_last_checkpoint, is_main_process
 from transformers.utils import check_min_version
+from transformers.trainer_callback import TrainerCallback
 
 # GP-LoRA imports
 import loralib as lora
+
+
+class TrainingMetricsCallback(TrainerCallback):
+    """
+    Callback to track comprehensive training metrics for comparing LoRA vs GP-LoRA.
+    
+    Tracks:
+    - Per-step time (average time per training step)
+    - Steps to converge (steps to reach target accuracy/loss thresholds)
+    - Total training time
+    - Loss/accuracy progression over time
+    """
+    
+    def __init__(self, gp_lora=False, target_accuracies=None):
+        self.gp_lora = gp_lora
+        self.start_time = None
+        self.step_times = []
+        self.step_start_time = None
+        
+        # Loss history with timestamps
+        self.history = []
+        
+        # Convergence tracking for accuracy
+        self.target_accuracies = target_accuracies or [0.70, 0.75, 0.80, 0.85, 0.90, 0.92, 0.94]
+        self.steps_to_accuracy = {}
+        self.time_to_accuracy = {}
+        
+        # Target losses
+        self.target_losses = [1.0, 0.8, 0.6, 0.5, 0.4, 0.3]
+        self.steps_to_loss = {}
+        self.time_to_loss = {}
+        
+        # Final metrics
+        self.total_steps = 0
+        self.total_time = 0
+        self.final_loss = None
+        self.best_accuracy = 0
+        self.best_loss = float('inf')
+    
+    def on_train_begin(self, args, state, control, **kwargs):
+        self.start_time = time.time()
+        method = 'GP-LoRA' if self.gp_lora else 'LoRA'
+        print(f'\n{"="*80}')
+        print(f'Starting training with {method}')
+        print(f'{"="*80}\n')
+    
+    def on_step_begin(self, args, state, control, **kwargs):
+        self.step_start_time = time.time()
+    
+    def on_step_end(self, args, state, control, **kwargs):
+        if self.step_start_time is not None:
+            step_time = time.time() - self.step_start_time
+            self.step_times.append(step_time)
+        self.total_steps = state.global_step
+    
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        if logs is None:
+            return
+        
+        elapsed = time.time() - self.start_time if self.start_time else 0
+        step = state.global_step
+        
+        entry = {
+            'step': step,
+            'time': elapsed,
+        }
+        
+        # Track loss
+        if 'loss' in logs:
+            loss = logs['loss']
+            entry['loss'] = loss
+            if loss < self.best_loss:
+                self.best_loss = loss
+            
+            # Check convergence thresholds
+            for target in self.target_losses:
+                if target not in self.steps_to_loss and loss <= target:
+                    self.steps_to_loss[target] = step
+                    self.time_to_loss[target] = elapsed
+        
+        # Track eval accuracy if present
+        if 'eval_accuracy' in logs:
+            acc = logs['eval_accuracy']
+            entry['eval_accuracy'] = acc
+            if acc > self.best_accuracy:
+                self.best_accuracy = acc
+            
+            for target in self.target_accuracies:
+                if target not in self.steps_to_accuracy and acc >= target:
+                    self.steps_to_accuracy[target] = step
+                    self.time_to_accuracy[target] = elapsed
+        
+        self.history.append(entry)
+        self.final_loss = logs.get('loss', self.final_loss)
+    
+    def on_train_end(self, args, state, control, **kwargs):
+        self.total_time = time.time() - self.start_time if self.start_time else 0
+        self.total_steps = state.global_step
+    
+    def get_avg_step_time_ms(self):
+        if not self.step_times:
+            return 0
+        return sum(self.step_times) / len(self.step_times) * 1000
+    
+    def get_steps_per_second(self):
+        if self.total_time == 0:
+            return 0
+        return self.total_steps / self.total_time
+    
+    def get_summary(self) -> Dict[str, Any]:
+        return {
+            'method': 'GP-LoRA' if self.gp_lora else 'LoRA',
+            'gp_lora': self.gp_lora,
+            
+            # Timing metrics
+            'total_time_seconds': self.total_time,
+            'total_time_minutes': self.total_time / 60,
+            'avg_step_time_ms': self.get_avg_step_time_ms(),
+            'steps_per_second': self.get_steps_per_second(),
+            
+            # Training metrics
+            'total_steps': self.total_steps,
+            'final_loss': self.final_loss,
+            'best_loss': self.best_loss,
+            'best_accuracy': self.best_accuracy,
+            
+            # Convergence metrics
+            'steps_to_accuracy': self.steps_to_accuracy,
+            'time_to_accuracy': self.time_to_accuracy,
+            'steps_to_loss': self.steps_to_loss,
+            'time_to_loss': self.time_to_loss,
+        }
+    
+    def save_metrics(self, output_dir: str):
+        """Save comprehensive metrics to files."""
+        summary = self.get_summary()
+        summary['history'] = self.history
+        
+        # Save full metrics
+        metrics_file = os.path.join(output_dir, 'training_metrics.json')
+        with open(metrics_file, 'w') as f:
+            json.dump(summary, f, indent=2)
+        
+        # Save comparison-ready metrics
+        comparison_file = os.path.join(output_dir, 'comparison_metrics.json')
+        comparison_data = {
+            'method': summary['method'],
+            'total_time_seconds': summary['total_time_seconds'],
+            'total_time_minutes': summary['total_time_minutes'],
+            'avg_step_time_ms': summary['avg_step_time_ms'],
+            'steps_per_second': summary['steps_per_second'],
+            'total_steps': summary['total_steps'],
+            'final_loss': summary['final_loss'],
+            'best_loss': summary['best_loss'],
+            'best_accuracy': summary['best_accuracy'],
+            'steps_to_acc_85': summary['steps_to_accuracy'].get(0.85),
+            'steps_to_acc_90': summary['steps_to_accuracy'].get(0.90),
+            'time_to_acc_85': summary['time_to_accuracy'].get(0.85),
+            'time_to_acc_90': summary['time_to_accuracy'].get(0.90),
+        }
+        with open(comparison_file, 'w') as f:
+            json.dump(comparison_data, f, indent=2)
+        
+        return metrics_file, comparison_file
+    
+    def print_summary(self):
+        method = 'GP-LoRA' if self.gp_lora else 'LoRA'
+        print('\n' + '=' * 80)
+        print(f'TRAINING METRICS SUMMARY - {method}')
+        print('=' * 80)
+        
+        print(f'\n[TIMING]')
+        print(f'  Total training time:    {self.total_time:.2f}s ({self.total_time/60:.2f} min)')
+        print(f'  Average step time:      {self.get_avg_step_time_ms():.2f} ms')
+        print(f'  Training throughput:    {self.get_steps_per_second():.2f} steps/sec')
+        
+        print(f'\n[FINAL METRICS]')
+        print(f'  Total steps:            {self.total_steps}')
+        print(f'  Best loss:              {self.best_loss:.4f}')
+        print(f'  Best accuracy:          {self.best_accuracy:.4f}')
+        
+        print(f'\n[CONVERGENCE - Steps to reach target accuracy]')
+        for target in sorted(self.target_accuracies):
+            if target in self.steps_to_accuracy:
+                print(f'  Acc >= {target:.0%}:  step {self.steps_to_accuracy[target]:>6d}  '
+                      f'(time: {self.time_to_accuracy[target]:.1f}s)')
+            else:
+                print(f'  Acc >= {target:.0%}:  not reached')
+        
+        print(f'\n[CONVERGENCE - Steps to reach target loss]')
+        for target in sorted(self.target_losses, reverse=True):
+            if target in self.steps_to_loss:
+                print(f'  Loss <= {target:.1f}:  step {self.steps_to_loss[target]:>6d}  '
+                      f'(time: {self.time_to_loss[target]:.1f}s)')
+            else:
+                print(f'  Loss <= {target:.1f}:  not reached')
+        
+        print('=' * 80 + '\n')
 
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
@@ -600,6 +801,9 @@ def main():
     else:
         data_collator = None
 
+    # Initialize metrics callback for tracking LoRA vs GP-LoRA performance
+    metrics_callback = TrainingMetricsCallback(gp_lora=model_args.gp_lora)
+    
     # Initialize our Trainer (use GPLoRATrainer if gp_lora is enabled)
     trainer_cls = GPLoRATrainer if model_args.gp_lora else Trainer
     trainer_kwargs = dict(
@@ -610,6 +814,7 @@ def main():
         compute_metrics=compute_metrics,
         tokenizer=tokenizer,
         data_collator=data_collator,
+        callbacks=[metrics_callback],
     )
     
     # Add GP-LoRA specific arguments if using GPLoRATrainer
@@ -643,6 +848,12 @@ def main():
         trainer.log_metrics("train", metrics)
         trainer.save_metrics("train", metrics)
         trainer.save_state()
+        
+        # Print and save comprehensive training metrics
+        metrics_callback.print_summary()
+        metrics_file, comparison_file = metrics_callback.save_metrics(training_args.output_dir)
+        logger.info(f"Training metrics saved to: {metrics_file}")
+        logger.info(f"Comparison metrics saved to: {comparison_file}")
 
     # Evaluation
     if training_args.do_eval:
