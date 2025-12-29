@@ -19,6 +19,14 @@ LoRA parameterizes weight updates as a low-rank product Δ = BA. This factorizat
 
 Different factorizations of the *same* Δ can exhibit dramatically different convergence rates. GP-LoRA leverages this by projecting onto favorable factorizations at each step.
 
+<p align="center">
+  <img src="figures/phase_portrait_vector_field_clean.png" width="500" alt="Phase portrait showing vector field, gauge orbits, and invariant manifolds"/>
+</p>
+
+<p align="center">
+  <em>Scalar rank-1 LoRA phase portrait: The vector field shows gradient flow dynamics. Green dotted lines are gauge orbits (same Δ). Red/purple lines are invariant manifolds (constant imbalance C). Orange dashed curve shows equilibria.</em>
+</p>
+
 ### The Gauge Projection
 
 After each optimizer step, GP-LoRA applies a gauge transformation that enforces:
@@ -114,7 +122,15 @@ bash run_e2e_gplora.sh
 
 ## Theoretical Note
 
-This work shows that for overparameterized gradient flows (such as the LoRA factorization Δ = BA): The imbalance C = AA^⊤ − B^⊤B is preserved under gradient flow, partitioning parameter space into disjoint invariant manifolds. Convergence speed depends on an imbalance metric—different factorizations of the same Δ can converge at arbitrarily different rates. These properties are inherent to the compositional structure itself, independent of the specific cost function
+This work shows that for overparameterized gradient flows (such as the LoRA factorization Δ = BA): The imbalance C = AA^⊤ − B^⊤B is preserved under gradient flow, partitioning parameter space into disjoint invariant manifolds. Convergence speed depends on an imbalance metric—different factorizations of the same Δ can converge at arbitrarily different rates. These properties are inherent to the compositional structure itself, independent of the specific cost function.
+
+<p align="center">
+  <img src="figures/phase_portrait_gradient_flow.png" width="600" alt="Different imbalance leads to different convergence speed"/>
+</p>
+
+<p align="center">
+  <em>Two initializations with the same Δ₀ but different imbalance C converge at different speeds. The imbalanced initialization (purple) reaches equilibrium faster than the balanced one (red), demonstrating initialization-dependent acceleration.</em>
+</p>
 
 GP-LoRA exploits these theoretical insights by using gauge transformations to *choose* which invariant manifold to optimize on, rather than being locked into one by initialization.
 
