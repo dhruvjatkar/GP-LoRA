@@ -8,6 +8,15 @@
 
 ---
 
+
+<p align="center">
+  <img src="figures/phase_portrait_vector_field_clean.png" width="500" alt="Phase portrait showing vector field, gauge orbits, and invariant manifolds"/>
+</p>
+
+<p align="center">
+  <em>Scalar rank-1 LoRA phase portrait: The vector field shows gradient flow dynamics. Green dotted lines are gauge orbits (same Δ). Red/purple lines are invariant manifolds (constant imbalance C). Orange dashed curve shows equilibria.</em>
+</p>
+
 GP-LoRA extends Low-Rank Adaptation (LoRA) by exploiting the inherent *gauge symmetry* of the low-rank factorization to accelerate and stabilize fine-tuning. Rather than adding regularization penalties, GP-LoRA enforces an imbalance constraint *exactly* through a loss-preserving gauge projection after each optimizer step.
 
 ## Core Insight
@@ -19,13 +28,6 @@ LoRA parameterizes weight updates as a low-rank product Δ = BA. This factorizat
 
 Different factorizations of the *same* Δ can exhibit dramatically different convergence rates. GP-LoRA leverages this by projecting onto favorable factorizations at each step.
 
-<p align="center">
-  <img src="figures/phase_portrait_vector_field_clean.png" width="500" alt="Phase portrait showing vector field, gauge orbits, and invariant manifolds"/>
-</p>
-
-<p align="center">
-  <em>Scalar rank-1 LoRA phase portrait: The vector field shows gradient flow dynamics. Green dotted lines are gauge orbits (same Δ). Red/purple lines are invariant manifolds (constant imbalance C). Orange dashed curve shows equilibria.</em>
-</p>
 
 ### The Gauge Projection
 
